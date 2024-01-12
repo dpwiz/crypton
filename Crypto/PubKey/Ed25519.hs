@@ -24,13 +24,17 @@ module Crypto.PubKey.Ed25519
     -- * Methods
     , toPublic
     , sign
+    , signLazy
     , verify
     , generateSecretKey
     ) where
 
+import qualified Data.ByteString.Lazy as L
 import           Data.Word
 import           Foreign.C.Types
+import           Foreign.Marshal.Array
 import           Foreign.Ptr
+import           Foreign.Storable
 
 import           Crypto.Error
 import           Crypto.Internal.ByteArray (ByteArrayAccess, Bytes,
@@ -113,6 +117,33 @@ verify public message signatureVal = unsafeDoIO $
   where
     !msgLen = B.length message
 
+-- | Sign a message using the key pair
+signLazy :: SecretKey -> PublicKey -> L.ByteString -> Signature
+signLazy secret public message =
+    Signature $ B.allocAndFreeze signatureSize $ \sig ->
+        withByteArray secret $ \sec ->
+        withByteArray public $ \pub ->
+        withChunks $ \chunks lengths -> do
+            -- print (chunks, lengths, nChunks)
+            -- peekArray nChunks chunks >>= print
+            -- peekArray nChunks lengths >>= print
+            ccrypton_ed25519_sign_chunks chunks lengths (fromIntegral nChunks) sec pub sig
+  where
+    nChunks = L.foldlChunks (\n _c -> n + 1) 0 message
+    withChunks :: (Ptr (Ptr Word8) -> Ptr CSize -> IO ()) -> IO ()
+    withChunks f =
+        allocaArray nChunks $ \chunksPtr ->
+        allocaArray nChunks $ \lengthsPtr ->
+        go chunksPtr lengthsPtr (f chunksPtr lengthsPtr) (L.toChunks message)
+    go _cp _lp f' [] = f'
+    go cp lp f' (c : cs) =
+        withByteArray c $ \cptr -> do
+            poke cp cptr
+            poke lp (fromIntegral $ B.length c)
+            go (cp `plusPtr` ptrSize) (lp `plusPtr` intSize) f' cs
+    ptrSize = sizeOf (undefined :: Ptr (Ptr Word8))
+    intSize = sizeOf (undefined :: CSize)
+
 -- | Generate a secret key
 generateSecretKey :: MonadRandom m => m SecretKey
 generateSecretKey = SecretKey <$> getRandomBytes secretKeySize
@@ -148,3 +179,20 @@ foreign import ccall "crypton_ed25519_sign"
                              -> Ptr PublicKey -- public
                              -> Ptr Signature -- signature
                              -> IO ()
+
+foreign import ccall "crypton_ed25519_sign_chunks"
+    ccrypton_ed25519_sign_chunks :: Ptr (Ptr Word8)  -- message chunks
+                                    -> Ptr CSize     -- chunk lengths
+                                    -> CSize         -- number of chunks
+                                    -> Ptr SecretKey -- secret
+                                    -> Ptr PublicKey -- public
+                                    -> Ptr Signature -- signature
+                                    -> IO ()
+
+foreign import ccall "crypton_ed25519_sign_open_chunks"
+    ccrypton_ed25519_sign_open_chunks :: Ptr (Ptr Word8) -- message chunks
+                                    -> Ptr CSize         -- chunk lengths
+                                    -> CSize             -- number of chunks
+                                    -> Ptr PublicKey     -- public
+                                    -> Ptr Signature     -- signature
+                                    -> IO CInt

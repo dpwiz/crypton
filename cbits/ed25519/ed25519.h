@@ -15,7 +15,9 @@ typedef unsigned char curved25519_key[32];
 
 void crypton_ed25519_publickey(const ed25519_secret_key sk, ed25519_public_key pk);
 int crypton_ed25519_sign_open(const unsigned char *m, size_t mlen, const ed25519_public_key pk, const ed25519_signature RS);
+// int crypton_ed25519_sign_open_chunks(const unsigned char **chunks, const size_t *lengths, size_t nchunks, const ed25519_public_key pk, const ed25519_signature RS);
 void crypton_ed25519_sign(const unsigned char *m, size_t mlen, const ed25519_secret_key sk, const ed25519_public_key pk, ed25519_signature RS);
+void crypton_ed25519_sign_chunks(const unsigned char **chunks, const size_t *lengths, size_t nchunks, const ed25519_secret_key sk, const ed25519_public_key pk, ed25519_signature RS);
 
 //int crypton_ed25519_sign_open_batch(const unsigned char **m, size_t *mlen, const unsigned char **pk, const unsigned char **RS, size_t num, int *valid);
 
