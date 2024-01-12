@@ -35,6 +35,19 @@ ed25519_hram(hash_512bits hram, const ed25519_signature RS, const ed25519_public
 	ed25519_hash_final(&ctx, hram);
 }
 
+static void
+ed25519_hram_chunks(hash_512bits hram, const ed25519_signature RS, const ed25519_public_key pk, const unsigned char **chunks, const size_t *lengths, size_t nchunks) {
+	ed25519_hash_context ctx;
+	int c;
+	ed25519_hash_init(&ctx);
+	ed25519_hash_update(&ctx, RS, 32);
+	ed25519_hash_update(&ctx, pk, 32);
+	for (c=0; c < nchunks; c++) {
+		ed25519_hash_update(&ctx, chunks[c], lengths[c]);
+	}
+	ed25519_hash_final(&ctx, hram);
+}
+
 void
 ED25519_FN(ed25519_publickey) (const ed25519_secret_key sk, ed25519_public_key pk) {
 	bignum256modm a;
@@ -80,7 +93,45 @@ ED25519_FN(ed25519_sign) (const unsigned char *m, size_t mlen, const ed25519_sec
 	/* S = (r + H(R,A,m)a) */
 	add256_modm(S, S, r);
 
-	/* S = (r + H(R,A,m)a) mod L */	
+	/* S = (r + H(R,A,m)a) mod L */
+	contract256_modm(RS + 32, S);
+}
+
+void
+ED25519_FN(ed25519_sign_chunks) (const unsigned char **chunks, const size_t *lengths, size_t nchunks, const ed25519_secret_key sk, const ed25519_public_key pk, ed25519_signature RS) {
+	ed25519_hash_context ctx;
+	bignum256modm r, S, a;
+	ge25519 ALIGN(16) R;
+	hash_512bits extsk, hashr, hram;
+	size_t c;
+
+	ed25519_extsk(extsk, sk);
+
+	/* r = H(aExt[32..64], m) */
+	ed25519_hash_init(&ctx);
+	ed25519_hash_update(&ctx, extsk + 32, 32);
+		for (c=0; c < nchunks; c++) {
+		ed25519_hash_update(&ctx, chunks[c], lengths[c]);
+	}
+	ed25519_hash_final(&ctx, hashr);
+	expand256_modm(r, hashr, 64);
+
+	/* R = rB */
+	ge25519_scalarmult_base_niels(&R, ge25519_niels_base_multiples, r);
+	ge25519_pack(RS, &R);
+
+	/* S = H(R,A,m).. */
+	ed25519_hram_chunks(hram, RS, pk, chunks, lengths, nchunks);
+	expand256_modm(S, hram, 64);
+
+	/* S = H(R,A,m)a */
+	expand256_modm(a, extsk, 32);
+	mul256_modm(S, S, a);
+
+	/* S = (r + H(R,A,m)a) */
+	add256_modm(S, S, r);
+
+	/* S = (r + H(R,A,m)a) mod L */
 	contract256_modm(RS + 32, S);
 }
 
